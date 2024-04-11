@@ -34,10 +34,16 @@ import sys
 from geometry_msgs.msg import Point, Pose, Quaternion, TransformStamped
 from interbotix_common_modules import angle_manipulation as ang
 from interbotix_perception_modules.apriltag import InterbotixAprilTagInterface
+from apriltag_ros.msg import AprilTagDetection, AprilTagDetectionArray
+from apriltag_ros.srv import AnalyzeSingleImage
+from interbotix_perception_msgs.srv import SnapPicture
+from sensor_msgs.msg import CameraInfo
 import numpy as np
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.time import Time
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup
 import tf2_ros
 
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
@@ -52,13 +58,7 @@ class TagDetector():
         arm_tag_id: int,
         target_tag_id: int,
         target_obj_frame: str,
-        armtag_ns: str = 'armtag',
-        apriltag_ns: str = 'apriltag',
-        ref_frame: str = None,
-        arm_tag_frame: str = None,
-        arm_base_frame: str = None,
         node_inf: Node = None,
-        args=None,
     ) -> None:
         """
         Construct InterbotixArmTagInterface node.
@@ -74,43 +74,12 @@ class TagDetector():
         """
         self.arm_tag_id = arm_tag_id
         self.target_tag_id = target_tag_id
+        self.valid_tags = None
         self.target_tf = target_obj_frame
-
-        self.apriltag_inf = InterbotixAprilTagInterface(
-            apriltag_ns=apriltag_ns,
-            node_inf=node_inf,
-            args=args,
-        )
-
-        if arm_tag_frame is None:
-            self.apriltag_inf.node_inf.declare_parameter(
-                'arm_tag_frame',
-                'px150/ar_tag_link'
-            )
-            self.arm_tag_frame = self.apriltag_inf.node_inf.get_parameter(
-                'arm_tag_frame').get_parameter_value().string_value
-        else:
-            self.arm_tag_frame = arm_tag_frame
-
-        if ref_frame is None:
-            self.apriltag_inf.node_inf.declare_parameter(
-                'ref_frame',
-                'camera_color_optical_frame'
-            )
-            self.ref_frame = self.apriltag_inf.node_inf.get_parameter(
-                'ref_frame').get_parameter_value().string_value
-        else:
-            self.ref_frame = ref_frame
-
-        if arm_base_frame is None:
-            self.apriltag_inf.node_inf.declare_parameter(
-                'arm_base_frame',
-                'px150/base_link'
-            )
-            self.arm_base_frame = self.apriltag_inf.node_inf.get_parameter(
-                'arm_base_frame').get_parameter_value().string_value
-        else:
-            self.arm_base_frame = arm_base_frame
+        self.ref_frame = 'camera_color_optical_frame'
+        self.arm_base_frame = 'px150/base_link'
+        self.arm_tag_frame = 'px150/ar_tag_link'
+        self.node = node_inf
 
         self.trans = TransformStamped()
         self.trans.header.frame_id = self.ref_frame
@@ -119,9 +88,76 @@ class TagDetector():
         self.rpy = [0, 0, 0]
 
         self.tfBuffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tfBuffer, self.apriltag_inf.node_inf)
+        self.tf_listener = tf2_ros.TransformListener(self.tfBuffer,
+                                                     self.node)
 
-        self.apriltag_inf.node_inf.get_logger().info('Initialized InterbotixArmTagInterface!')
+        # Clients for apriltag services
+        self.apriltag_cbg = ReentrantCallbackGroup()
+        self.srv_snap_picture = self.node.create_client(
+            SnapPicture,
+            '/apriltag/snap_picture',
+            callback_group=self.apriltag_cbg
+        )
+        while not self.srv_snap_picture.wait_for_service(timeout_sec=1.0):
+            self.node.get_logger().info('Waiting for SnapPicture service')
+        self.srv_analyse_img = self.node.create_client(
+            AnalyzeSingleImage,
+            '/apriltag/single_image_tag_detection',
+            callback_group=self.apriltag_cbg
+        )
+        while not self.srv_analyse_img.wait_for_service(timeout_sec=1.0):
+            self.node.get_logger().info('Waiting for AnalyzeSingleImage service')
+        # Request for apriltag detection service
+        self.request = AnalyzeSingleImage.Request()
+        self.request.full_path_where_to_get_image = '/tmp/get_image.png'
+        self.request.full_path_where_to_save_image = '/tmp/save_image.png'
+        
+        # Determine the camera frame id
+        self.camera_frame_id = None
+        self.sub_camera_info = self.node.create_subscription(
+            CameraInfo,
+            '/camera/color/camera_info',
+            self.camera_info_cb,
+            10,
+            callback_group=self.apriltag_cbg
+        )
+        self.node.get_logger().info('Initialized InterbotixArmTagInterface!')
+
+    def camera_info_cb(self, msg):
+        self.camera_frame_id = msg.header.frame_id
+        self.node.get_logger().info(f'Camera frame: {self.camera_frame_id}')
+        self.request.camera_info = msg
+        self.node.destroy_subscription(self.sub_camera_info)
+
+    def _snap(self):
+        self.node.get_logger().info('Snapping')
+        snap_res = self.srv_snap_picture.call(
+            SnapPicture.Request(filename='/tmp/get_image.png')
+        )
+        self.node.get_logger().info('Snap done')
+        if not snap_res.success:
+            self.node.get_logger().info('Snap failed')
+            return AprilTagDetectionArray()
+        self.node.get_logger().info('Analysing')
+        analyse_res = self.srv_analyse_img.call(self.request)
+        self.node.get_logger().info('Analysis done')
+        return analyse_res.tag_detections
+
+    def find_pose_id(self):
+        if self.valid_tags is None:
+            self.node.get_logger().warning(
+                'Tried to find pose of valid tags but valid ids are not set'
+            )
+        detections = self._snap().detections
+        if len(detections) == 0:
+            return [], []
+        poses = []
+        tags = []
+        for d in detections:
+            if d.id[0] in self.valid_tags:
+                poses.append(d.pose.pose.pose)
+                tags.append(d.id[0])
+        return poses, tags
 
     def find_ref_to_arm_base_transform(self):
         """
@@ -152,12 +188,12 @@ class TagDetector():
         # take the average pose (w.r.t. the camera frame) of the AprilTag over number of samples
         point = Point()
         rpy = [0, 0, 0]
-        self.apriltag_inf.set_valid_tags([self.arm_tag_id])
+        self.valid_tags = [self.arm_tag_id]
         for _ in range(num_samples):
-            poses, tags = self.apriltag_inf.find_pose_id()
+            poses, tags = self.find_pose_id()
             if len(poses) == 0 or tags[0] != self.arm_tag_id:
-                self.apriltag_inf.node_inf.get_logger().info(
-                    'Did not find arm tag',str(tags))
+                self.node.get_logger().info(
+                    f'Did not find arm tag {tags}')
                 return None
             ps = poses[0]
             point.x += ps.position.x / float(num_samples)
@@ -169,7 +205,7 @@ class TagDetector():
             rpy[0] += rpy_sample[0] / float(num_samples)
             rpy[1] += rpy_sample[1] / float(num_samples)
             rpy[2] += rpy_sample[2] / float(num_samples)
-        self.apriltag_inf.node_inf.get_logger().info(
+        self.node.get_logger().info(
             'Arm tag detected')
         T_CamTag = ang.pose_to_transformation_matrix(
             [point.x, point.y, point.z, rpy[0], rpy[1], rpy[2]]
@@ -190,13 +226,14 @@ class TagDetector():
 
         # Now, lets find the transform of the arm's base_link frame w.r.t. the reference frame
         T_CamBase = np.dot(T_CamTag, T_TagBase)
-        if ref_frame == self.apriltag_inf.image_frame_id:
+        if ref_frame == self.camera_frame_id:
             T_RefBase = T_CamBase
         else:
+            self.node.get_logger().info(f'JERE {self.camera_frame_id}')
             T_RefCam = self.get_transform(
                 tfBuffer=self.tfBuffer,
                 target_frame=ref_frame,
-                source_frame=self.apriltag_inf.image_frame_id
+                source_frame=self.camera_frame_id
             )
             T_RefBase = np.dot(T_RefCam, T_CamBase)
 
@@ -212,7 +249,7 @@ class TagDetector():
         self.trans.transform.rotation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
         self.trans.header.frame_id = ref_frame
         self.trans.child_frame_id = arm_base_frame
-        self.trans.header.stamp = self.apriltag_inf.node_inf.get_clock().now().to_msg()
+        self.trans.header.stamp = self.node.get_clock().now().to_msg()
         # TODO we might be able to publish the transform straight from this node
         return self.trans
         #self.apriltag_inf.pub_transforms.publish(self.trans)
@@ -234,11 +271,11 @@ class TagDetector():
         # take the average pose (w.r.t. the camera frame) of the AprilTag over number of samples
         point = Point()
         rpy = [0, 0, 0]
-        self.apriltag_inf.set_valid_tags([self.target_tag_id])
+        self.valid_tags = [self.target_tag_id]
         for _ in range(num_samples):
-            poses, tags = self.apriltag_inf.find_pose_id()
+            poses, tags = self.find_pose_id()
             if len(poses) == 0 or tags[0] != self.target_tag_id:
-                self.apriltag_inf.node_inf.get_logger().info(
+                self.node.get_logger().info(
                     'Did not find target tag'+str(tags)+' '+str(len(poses)))
                 return None
             ps = poses[0]
@@ -251,7 +288,7 @@ class TagDetector():
             rpy[0] += rpy_sample[0] / float(num_samples)
             rpy[1] += rpy_sample[1] / float(num_samples)
             rpy[2] += rpy_sample[2] / float(num_samples)
-        self.apriltag_inf.node_inf.get_logger().info(
+        self.node.get_logger().info(
             'Target tag detected')
         T_CamTag = ang.pose_to_transformation_matrix(
             [point.x, point.y, point.z, rpy[0], rpy[1], rpy[2]]
@@ -268,7 +305,7 @@ class TagDetector():
         self.trans.transform.rotation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
         self.trans.header.frame_id = ref_frame
         self.trans.child_frame_id = target_obj_frame
-        self.trans.header.stamp = self.apriltag_inf.node_inf.get_clock().now().to_msg()
+        self.trans.header.stamp = self.node.get_clock().now().to_msg()
         #self.apriltag_inf.pub_transforms.publish(self.trans)
         return self.trans
 
@@ -298,7 +335,7 @@ class TagDetector():
             tf2_ros.ConnectivityException,
             tf2_ros.ExtrapolationException
         ) as e:
-            self.apriltag_inf.node_inf.get_logger().error(
+            self.node.get_logger().error(
                 f"Failed to look up the transform from '{target_frame}' to '{source_frame}'. {e}"
             )
             return np.identity(4)
