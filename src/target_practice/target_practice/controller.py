@@ -25,26 +25,24 @@ class TargetPracticeController(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.transform = None
         # Timer waiting for the transform to be ready
-        self.move_timer = None
-        # Detect the arm and target
-        self.detected_all = False
-        self.robot_arm_tf = None
-        self.robot_tf_timer = None
-        self.target_tf = None
-        self.target_tf_timer = None
-        self.tf_bcast = TransformBroadcaster(self)
+        self.move_timer = self.create_timer(1.0, self.move_timer_cb)
         # Callback groups
         self.detect_cbg = MutuallyExclusiveCallbackGroup()
+        self.tf_timer_cbg = MutuallyExclusiveCallbackGroup()
         self.move_timer_cbg = MutuallyExclusiveCallbackGroup()
         self.move_arm_cbg = MutuallyExclusiveCallbackGroup()
+        # Detect the arm and target
+        self.robot_arm_tf = None
+        self.target_tf = None
+        self.tf_publish_timer = self.create_timer(1.0,
+                                                  self.publish_transforms,
+                                                  callback_group=self.tf_timer_cbg)
+        self.tf_bcast = TransformBroadcaster(self)
         # Declare service for detection
         self.detect_srv = self.create_service(Trigger,
                                               'start_detection',
                                               self.detect_arm,
                                               callback_group=self.detect_cbg)
-        # Start detecting
-        # TODO - this is moving in the detect service
-        #self.detect_arm()
         # Temp
         self.move_arm_srv = self.create_client(MoveItPlan,
                                                    f'/target_practice/move_arm',
@@ -53,12 +51,12 @@ class TargetPracticeController(Node):
             self.get_logger().info('Waiting for move_arm service')
 
     def detect_arm(self, request, response):
+        self.target_tf = None
+        self.robot_arm_tf = None
         while self.robot_arm_tf is None:
             self.robot_arm_tf = self.tag_det.find_ref_to_arm_base_transform()
             # Introduce a delay
         self.get_logger().info('Robot arm tf ready')
-        # Start publishing target TF
-        self.robot_tf_timer = self.create_timer(1.0, self.robot_tf_cb)
         # Detect the target
         self.detect_target()
         response.success = True
@@ -69,24 +67,23 @@ class TargetPracticeController(Node):
             self.target_tf = self.tag_det.find_target_transform()
             # Introduce a delay
         self.get_logger().info('Target tf ready')
-        # Start publishing target TF
-        self.target_tf_timer = self.create_timer(1.0, self.target_tf_cb)
-        # Prepare to move the robot arm
-        self.move_timer = self.create_timer(1.0,
-                                            self.move_timer_cb,
-                                            callback_group=self.move_timer_cbg)
 
-    def robot_tf_cb(self):
-        self.robot_arm_tf.header.stamp = self.get_clock().now().to_msg()
-        self.tf_bcast.sendTransform(self.robot_arm_tf)
-        #self.get_logger().info('Publish robot TF')
-
-    def target_tf_cb(self):
-        self.target_tf.header.stamp = self.get_clock().now().to_msg()
-        self.tf_bcast.sendTransform(self.target_tf)
-        #self.get_logger().info('Publish target TF')
+    def publish_transforms(self):
+        self.get_logger().info("Publishing TFs")
+        if self.robot_arm_tf is not None:
+            self.robot_arm_tf.header.stamp = self.get_clock().now().to_msg()
+            self.tf_bcast.sendTransform(self.robot_arm_tf)
+            self.get_logger().info('Publish robot TF')
+        if self.target_tf is not None:
+            self.target_tf.header.stamp = self.get_clock().now().to_msg()
+            self.tf_bcast.sendTransform(self.target_tf)
+            self.get_logger().info('Publish target TF')
 
     def move_timer_cb(self):
+        self.get_logger().info("Move timer")
+        # Exit early if no TFs available
+        if self.target_tf is None or self.robot_arm_tf is None:
+            return
         t = None
         try:
             now = self.get_clock().now()
