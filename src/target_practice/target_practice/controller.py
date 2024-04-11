@@ -25,7 +25,7 @@ class TargetPracticeController(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.transform = None
         # Timer waiting for the transform to be ready
-        self.move_timer = self.create_timer(1.0, self.move_timer_cb)
+        self.move_timer = None
         # Callback groups
         self.detect_cbg = MutuallyExclusiveCallbackGroup()
         self.tf_timer_cbg = MutuallyExclusiveCallbackGroup()
@@ -34,9 +34,7 @@ class TargetPracticeController(Node):
         # Detect the arm and target
         self.robot_arm_tf = None
         self.target_tf = None
-        self.tf_publish_timer = self.create_timer(1.0,
-                                                  self.publish_transforms,
-                                                  callback_group=self.tf_timer_cbg)
+        self.tf_publish_timer = None
         self.tf_bcast = TransformBroadcaster(self)
         # Declare service for detection
         self.detect_srv = self.create_service(Trigger,
@@ -59,6 +57,12 @@ class TargetPracticeController(Node):
         self.get_logger().info('Robot arm tf ready')
         # Detect the target
         self.detect_target()
+        self.tf_publish_timer = self.create_timer(1.0,
+                                                  self.publish_transforms,
+                                                  callback_group=self.tf_timer_cbg)
+        self.move_timer = self.create_timer(1.0,
+                                            self.move_timer_cb,
+                                            callback_group=self.move_timer_cbg)
         response.success = True
         return response
 
@@ -101,6 +105,7 @@ class TargetPracticeController(Node):
         self.get_logger().info(f'Transform: {(x,y,z)}')
         self.transform = (x,y,z)
         self.destroy_timer(self.move_timer)
+        self.destroy_timer(self.tf_publish_timer)
         self.move_arm()
 
     def move_arm(self):
