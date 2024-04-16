@@ -7,6 +7,7 @@ from target_practice.tag_detector import TagDetector
 from tf2_ros import TransformException, TransformBroadcaster
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
 from interbotix_perception_msgs.srv import SnapPicture
 from interbotix_moveit_interface_msgs.srv import MoveItPlan 
@@ -27,7 +28,8 @@ class TargetPracticeController(Node):
         # Timer waiting for the transform to be ready
         self.move_timer = None
         # Callback groups
-        self.detect_cbg = MutuallyExclusiveCallbackGroup()
+        self.detect_arm_cbg = MutuallyExclusiveCallbackGroup()
+        self.detect_target_cbg = MutuallyExclusiveCallbackGroup()
         self.tf_timer_cbg = MutuallyExclusiveCallbackGroup()
         self.move_timer_cbg = MutuallyExclusiveCallbackGroup()
         self.move_arm_cbg = MutuallyExclusiveCallbackGroup()
@@ -35,12 +37,17 @@ class TargetPracticeController(Node):
         self.robot_arm_tf = None
         self.target_tf = None
         self.tf_publish_timer = None
-        self.tf_bcast = TransformBroadcaster(self)
+        #self.tf_bcast = TransformBroadcaster(self)
+        self.tf_static_bcast = StaticTransformBroadcaster(self)
         # Declare service for detection
-        self.detect_srv = self.create_service(Trigger,
-                                              'start_detection',
+        self.detect_arm_srv = self.create_service(Trigger,
+                                              'detect_arm',
                                               self.detect_arm,
-                                              callback_group=self.detect_cbg)
+                                              callback_group=self.detect_arm_cbg)
+        self.detect_target_srv = self.create_service(Trigger,
+                                              'detect_target',
+                                              self.detect_target,
+                                              callback_group=self.detect_target_cbg)
         # Temp
         self.move_arm_srv = self.create_client(MoveItPlan,
                                                    f'/target_practice/move_arm',
@@ -51,10 +58,18 @@ class TargetPracticeController(Node):
     def detect_arm(self, request, response):
         self.target_tf = None
         self.robot_arm_tf = None
-        while self.robot_arm_tf is None:
+        for attempt in range(10):
             self.robot_arm_tf = self.tag_det.find_ref_to_arm_base_transform()
+            if self.robot_arm_tf is not None: break
             # Introduce a delay
+        if self.robot_arm_tf is None:
+            self.get_logger().info('Failed to find robot arm')
+            response.success = False
+            return response
         self.get_logger().info('Robot arm tf ready')
+        self.tf_static_bcast.sendTransform(self.robot_arm_tf)
+        response.success = True
+        return response
         # Detect the target
         self.detect_target()
         self.tf_publish_timer = self.create_timer(1.0,
@@ -66,11 +81,24 @@ class TargetPracticeController(Node):
         response.success = True
         return response
 
-    def detect_target(self):
-        while self.target_tf is None:
+    def detect_target(self, request, response):
+        self.target_tf = None
+        for attempt in range(10):
+            #while self.target_tf is None:
             self.target_tf = self.tag_det.find_target_transform()
+            if self.target_tf is not None: break
             # Introduce a delay
+        if self.target_tf == None:
+            self.get_logger().info('Failed to find target')
+            response.success = False
+            return response
         self.get_logger().info('Target tf ready')
+        self.tf_static_bcast.sendTransform(self.target_tf)
+        self.move_timer = self.create_timer(1.0,
+                                            self.move_timer_cb,
+                                            callback_group=self.move_timer_cbg)
+        response.success = True
+        return response
 
     def publish_transforms(self):
         self.get_logger().info("Publishing TFs")
@@ -99,7 +127,7 @@ class TargetPracticeController(Node):
             self.get_logger().info(f'Lookup transform failed: {ex}')
             return
         # Apply offsets for gripper and base
-        x = t.transform.translation.x - 0.07 # -0.07 for pointer, -0.04 w/o
+        x = t.transform.translation.x - 0.045 # -0.07 for pointer, -0.04 w/o
         y = t.transform.translation.y
         z = t.transform.translation.z + 0.07
         self.get_logger().info(f'Transform: {(x,y,z)}')
