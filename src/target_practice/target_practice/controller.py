@@ -20,7 +20,7 @@ class TargetPracticeController(Node):
         super().__init__("target_practice_ctrl")
         self.tag_det = TagDetector(1, 87, target_obj_frame='target_obj', node_inf=self)
         # Transform listener
-        self.to_frame = 'px150/base_link' # TF of robot base
+        self.to_frame = 'px150_1/base_link' # TF of robot base
         self.from_frame = 'target_obj' # TF of target object
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -50,7 +50,7 @@ class TargetPracticeController(Node):
                                               callback_group=self.detect_target_cbg)
         # Temp
         self.move_arm_srv = self.create_client(MoveItPlan,
-                                                   f'/target_practice/move_arm',
+                                                   f'/px150_1/move_arm',
                                                    callback_group=self.move_arm_cbg)
         while not self.move_arm_srv.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Waiting for move_arm service')

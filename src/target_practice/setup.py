@@ -10,7 +10,11 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name, ['launch/target_practice_launch.py']),
+        ('share/' + package_name, ['launch/target_practice_launch.py',
+                                   'launch/arm_controller_launch.py',
+                                   'launch/robot_local_launch.py',
+                                   'launch/robot_remote_launch.py',
+                                   ]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -24,7 +28,8 @@ setup(
             'tag_detector = target_practice.tag_detector:main',
             'controller = target_practice.controller:main',
             'arm_controller = target_practice.arm_controller:main',
-            'exp_manager = target_practice.exp_manager:main'
+            'exp_manager = target_practice.exp_manager:main',
+            'timer_test = target_practice.timer_test:main',
         ],
     },
 )

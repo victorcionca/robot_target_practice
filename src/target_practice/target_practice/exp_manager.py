@@ -4,6 +4,7 @@ import time
 from threading import Thread, Event
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from random import choice
 
@@ -16,6 +17,7 @@ sys.path.extend([
     '/root/interbotix_ws/install/interbotix_common_modules/lib/python3.8/site-packages'])
 
 from interbotix_moveit_interface_msgs.srv import MoveItPlan 
+from example_interfaces.srv import Trigger
 
 
 hostName = "0.0.0.0"
@@ -33,6 +35,7 @@ class TouchListener(BaseHTTPRequestHandler):
         BaseHTTPRequestHandler.__init__(self, *args)
 
     def do_GET(self):
+        print("Touch!")
         self.ev.set()  # Release main thread
         self.tp_result.state = True
         self.send_response(204)
@@ -50,9 +53,30 @@ class RobotMover(Node):
         super().__init__('robot_mover')
         # Create client for the target robot arm
         self.target_arm = self.create_client(MoveItPlan,
-                                             'move_arm') # TODO: proper service name
-        # Create client for the target practice TODO
-        self.detection_srv = None
+                                             '/px150_2/move_arm') # TODO: should use params/args
+        while not self.target_arm.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for target_arm move service')
+        # Create client for the target practice
+        self.detect_cbg = ReentrantCallbackGroup()
+        self.detect_arm_srv = self.create_client(Trigger,
+                                                '/target_practice/detect_arm',
+                                                callback_group=self.detect_cbg)
+        while not self.detect_arm_srv.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for detect arm service')
+        self.detect_target_srv = self.create_client(Trigger,
+                                                '/target_practice/detect_target')
+        while not self.detect_target_srv.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for detect target service')
+        
+    def detect_arm(self):
+        # Detect the arm to start
+        res = None
+        for attempt in range(10):
+            res = self.detect_arm_srv.call(Trigger.Request())
+            if res.success:
+                break
+        if not res.success:
+            self.get_logger().info('Could not detect arm. Do it manually')
 
     def move_target(self, x, y, z):
         """Calls service for moving the target arm. Returns status (true/false)"""
@@ -65,9 +89,11 @@ class RobotMover(Node):
         if mov_res.success: return True
         else: return False
 
-    def start_target_practice(self):
-        # TODO
-        pass
+    def detect_target(self):
+        res = None
+        res = self.detect_target_srv.call(Trigger.Request())
+        if not res.success:
+            self.get_logger().info('Failed to detect target')
 
 def start_webserver(webserver):
     try:
@@ -93,31 +119,45 @@ def main():
     print("Server started http://%s:%s" % (hostName, serverPort))
 
     # Run web server into separate thread
-    Thread(target=start_webserver, args=[webServer]).start()
+    ws_thread = Thread(target=start_webserver, args=[webServer])
+    ws_thread.start()
 
     # Interface to robots
     robot_if = RobotMover()
+    #executor = MultiThreadedExecutor()
+    #executor.add_node(robot_if)
+    #executor.spin()
     robot_if_thread = Thread(target=run_robot_if, args=[robot_if])
     robot_if_thread.start()
+    robot_if.detect_arm()
+    print("Ready to start")
 
     # List of coordinates
-    coords = [(0.2, 0.08, 0.3),
-              (0.2, -0.08, 0.3),
-              (0.205, -0.03, 0.22),
-              (0.205, 0.03, 0.22)]
+    #coords = [(0.2, 0.08, 0.3),
+    #          (0.2, -0.08, 0.3),
+    #          (0.205, -0.03, 0.22),
+    #          (0.205, 0.03, 0.22)]
+    coords = [
+        (0.1, 0.0, 0.3),
+        (0.2, 0.0, 0.3),
+        (0.2, 0.0, 0.26),
+        (0.15, 0.0, 0.25),
+        (0.15, 0.0, 0.3)
+    ]
 
     # Results
 
     # Run experiment for number of iterations
-    num_iters = 10
+    num_iters = 100
     touch_timeout = 5 # seconds
     for iter in range(num_iters):
         print(f"Starting iteration {iter}")
         # Move the target
-        x,y,z = choice(coords)
+        x,y,z = coords[iter%len(coords)]
         print(f"Moving target to {x,y,z}")
         robot_if.move_target(x,y,z)
         # Start the target practice
+        robot_if.detect_target()
         # Wait for the touch
         current_state.state = False
         touch_ev.clear()

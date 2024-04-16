@@ -77,8 +77,8 @@ class TagDetector():
         self.valid_tags = None
         self.target_tf = target_obj_frame
         self.ref_frame = 'camera_color_optical_frame'
-        self.arm_base_frame = 'px150/base_link'
-        self.arm_tag_frame = 'px150/ar_tag_link'
+        self.arm_base_frame = 'px150_1/base_link'
+        self.arm_tag_frame = 'px150_1/ar_tag_link'
         self.node = node_inf
 
         self.trans = TransformStamped()
@@ -229,7 +229,6 @@ class TagDetector():
         if ref_frame == self.camera_frame_id:
             T_RefBase = T_CamBase
         else:
-            self.node.get_logger().info(f'JERE {self.camera_frame_id}')
             T_RefCam = self.get_transform(
                 tfBuffer=self.tfBuffer,
                 target_frame=ref_frame,

@@ -18,8 +18,11 @@ def generate_launch_description():
             ]),
             launch_arguments={
                 'robot_model': 'px150',
+                'robot_name': 'px150_1',
+                'motor_configs': '/root/work/px150_1.yaml',
                 'show_ar_tag': 'true',
                 'use_rviz': 'false',
+                'use_sim': 'false',
                 'use_world_frame': 'false'
             }.items()
         ),
@@ -28,7 +31,10 @@ def generate_launch_description():
             package='realsense2_camera',
             namespace='camera',
             executable='realsense2_camera_node',
-            name='camera'
+            name='camera',
+            parameters=[
+                {'rgb_camera.profile': '1920x1080x15'}
+            ]
             ),
         # perception apriltag
         IncludeLaunchDescription(
@@ -49,7 +55,8 @@ def generate_launch_description():
             package='target_practice',
             namespace='target_practice',
             executable='arm_controller',
-            name='arm_controller'
+            name='arm_controller',
+            arguments=['--robot_name', 'px150_1']
         ),
         # Main node
         Node(
