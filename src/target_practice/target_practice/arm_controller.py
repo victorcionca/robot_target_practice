@@ -54,8 +54,10 @@ class ArmController(InterbotixManipulatorXS):
         self.core.get_logger().info('Start scanning')
         while self.arm_scan_thread_running:
             self.core.get_logger().info('Cycle')
-            self.arm.set_single_joint_position(f"waist", 1.57075, moving_time=4.0, blocking=True)
-            self.arm.set_single_joint_position(f"waist", -1.57075, moving_time=4.0, blocking=True)
+            self.arm.set_single_joint_position(f"waist", 0.785375, moving_time=4.0, blocking=True)
+            if not self.arm_scan_thread_running:
+                break
+            self.arm.set_single_joint_position(f"waist", -0.785375, moving_time=4.0, blocking=True)
         self.core.get_logger().info('Done scanning')
         self.arm.set_ee_pose_components(x=0.15, y=0, z=0.24)
         
