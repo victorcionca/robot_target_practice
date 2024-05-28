@@ -6,6 +6,7 @@ sys.path.extend([
     '/root/interbotix_ws/install/interbotix_moveit_interface_msgs/lib/python3.8/site-packages',
     '/root/interbotix_ws/install/interbotix_common_modules/lib/python3.8/site-packages'])
 
+from threading import Thread
 from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
 from interbotix_moveit_interface_msgs.srv import MoveItPlan 
 from example_interfaces.srv import Trigger
@@ -18,6 +19,7 @@ class ArmController(InterbotixManipulatorXS):
                          group_name='arm',
                          gripper_name='gripper')
         self.auto_finish = auto_finish
+        self.robot_name = robot_name
         # Create move arm service, use node in super
         self.move_arm_srv = self.core.create_service(MoveItPlan,
                                                      f'/{robot_name}/move_arm',
@@ -25,9 +27,38 @@ class ArmController(InterbotixManipulatorXS):
         self.sleep_arm_srv = self.core.create_service(Trigger,
                                                       f'/{robot_name}/sleep',
                                                       self.go_to_sleep)
+        self.start_scan_srv = self.core.create_service(Trigger,
+                                                 f'/{robot_name}/start_scan',
+                                                 self.start_scan)
+        self.stop_scan_srv = self.core.create_service(Trigger,
+                                                 f'/{robot_name}/stop_scan',
+                                                 self.stop_scan)
+        self.arm_scan_thread = None
         self.arm.set_ee_pose_components(x=0.15, y=0, z=0.24)
+        self.arm_scan_thread_running = False
         self.timer = None
 
+    def start_scan(self, request, response):
+        self.arm_scan_thread_running = True
+        self.arm_scan_thread = Thread(target=self.arm_scan)
+        self.arm_scan_thread.start()
+        response.success = True
+        return response
+
+    def stop_scan(self, request, response):
+        self.arm_scan_thread_running = False
+        response.success = True
+        return response
+
+    def arm_scan(self):
+        self.core.get_logger().info('Start scanning')
+        while self.arm_scan_thread_running:
+            self.core.get_logger().info('Cycle')
+            self.arm.set_single_joint_position(f"waist", 1.57075, moving_time=4.0, blocking=True)
+            self.arm.set_single_joint_position(f"waist", -1.57075, moving_time=4.0, blocking=True)
+        self.core.get_logger().info('Done scanning')
+        self.arm.set_ee_pose_components(x=0.15, y=0, z=0.24)
+        
     def move_arm(self, request, response):
         target_point = request.ee_pose.position
         self.core.get_logger().info(f'Moving arm to {target_point.x, target_point.y, target_point.z}')
