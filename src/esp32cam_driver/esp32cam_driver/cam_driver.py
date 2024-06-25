@@ -128,6 +128,9 @@ class Esp32CamDriver(Node):
                     # Set a timestamp for the frame
                     frame_timestamp_ns = time_ns()
                     # Publish the image
+                    img_msg.header.frame_id = "camera_link"
+                    img_msg.header.stamp.sec = int(frame_timestamp_ns/1e9)
+                    img_msg.header.stamp.nanosec = int(frame_timestamp_ns%1e9)
                     self.img_publisher.publish(img_msg)
                     # Publish the camera info
                     caminfo = create_caminfo()
