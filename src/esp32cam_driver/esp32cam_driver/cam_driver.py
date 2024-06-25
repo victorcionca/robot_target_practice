@@ -66,10 +66,10 @@ class Esp32CamDriver(Node):
         return resp
 
     def stop_streaming(self, req, resp):
+        self.streaming = False
         # Access streaming stop URL
         requests.get(stream_ctrl_url.format(status=0))
         # TODO error check on the above
-        self.streaming = False
         # Wait on the streaming thread to complete
         self.streaming_thread.join()
         # Complete the service
