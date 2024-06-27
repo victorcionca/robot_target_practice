@@ -18,9 +18,9 @@ import numpy as np
 from time import time_ns
 
 # TODO these could be node parameters
-cam_ip = "192.168.0.106"
-stream_url = "http://"+cam_ip+"/stream"
-stream_ctrl_url = "http://"+cam_ip+"/control?var=stream&val={status}"
+cam_ip = "10.0.0.1"
+stream_url = "http://{cam_ip}/stream"
+stream_ctrl_url = "http://{cam_ip}/control?var=stream&val={status}"
 
 def create_caminfo():
     """Create a caminfo for the espcam without a timestamp or sequence"""
@@ -39,9 +39,14 @@ def create_caminfo():
 class Esp32CamDriver(Node):
     def __init__(self, args=None):
         super().__init__('esp32cam_driver')
+        # Declare IP address parameter
+        self.declare_parameter('cam_ip', cam_ip)
+        self.cam_ip = self.get_parameter('cam_ip').get_parameter_value().string_value
+        self.get_logger().info(f"Camera IP: {self.cam_ip}")
+        #
         self.streaming = False
-        self.img_publisher = self.create_publisher(Image, 'espcam/image', 1)
-        self.caminfo_publisher = self.create_publisher(CameraInfo, 'espcam/camera_info', 1)
+        self.img_publisher = self.create_publisher(Image, 'image', 1)
+        self.caminfo_publisher = self.create_publisher(CameraInfo, 'camera_info', 1)
         # Service to start streaming
         self.streaming_cbg = MutuallyExclusiveCallbackGroup()
         self.start_streaming_srv = self.create_service(Trigger,
@@ -56,7 +61,7 @@ class Esp32CamDriver(Node):
 
     def start_streaming(self, req, resp):
         # Access streaming start URL
-        requests.get(stream_ctrl_url.format(status=1))
+        requests.get(stream_ctrl_url.format(cam_ip=self.cam_ip, status=1))
         # TODO error check on the above
         self.streaming = True
         # Start streaming 
@@ -68,7 +73,7 @@ class Esp32CamDriver(Node):
     def stop_streaming(self, req, resp):
         self.streaming = False
         # Access streaming stop URL
-        requests.get(stream_ctrl_url.format(status=0))
+        requests.get(stream_ctrl_url.format(cam_ip=self.cam_ip, status=0))
         # TODO error check on the above
         # Wait on the streaming thread to complete
         self.streaming_thread.join()
@@ -77,9 +82,9 @@ class Esp32CamDriver(Node):
         return resp
 
     def fetch_mjpeg_stream(self):
-        response = requests.get(stream_url, stream=True)
+        response = requests.get(stream_url.format(cam_ip=self.cam_ip), stream=True)
         if response.status_code != 200:
-            self.get_logger().info(f"Failed to connect to {stream_url}, status code: {response.status_code}")
+            self.get_logger().info(f"Failed to connect to {stream_url.format(cam_ip=self.cam_ip)}, status code: {response.status_code}")
             return
 
         boundary = None
