@@ -15,6 +15,7 @@
   <build_depend>tf2_geometry_msgs</build_depend>
   <build_depend>interbotix_xs_msgs</build_depend>
   <build_depend>std_srvs</build_depend>
+  <build_depend>esp32cam_driver</build_depend>
 
   <build_export_depend>apriltag_ros</build_export_depend>
   <build_export_depend>message_generation</build_export_depend>
@@ -31,6 +32,7 @@
   <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>interbotix_xs_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
+  <exec_depend>esp32cam_driver</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
