@@ -24,10 +24,37 @@ def generate_launch_description():
         default_value='192.168.0.106'
     )
 
+    record = LaunchConfiguration('record')
+    record_arg = DeclareLaunchArgument(
+        'record',
+        default_value='false'
+    )
+
+    replay = LaunchConfiguration('replay')
+    replay_arg = DeclareLaunchArgument(
+        'replay',
+        default_value='false'
+    )
+
+    use_sim = LaunchConfiguration('use_sim')
+    use_sim_arg = DeclareLaunchArgument(
+        'use_sim',
+        default_value='false'
+    )
+
+    use_rviz = LaunchConfiguration('use_rviz')
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='false'
+    )
     
     return LaunchDescription([
         robot_config_arg,
         robot_name_arg,
+        camera_ip_arg,
+        record_arg,
+        replay_arg,
+        use_sim_arg, use_rviz_arg,
         # interbotix_xsarm_controller xs_launch
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([
@@ -42,8 +69,8 @@ def generate_launch_description():
                 'robot_name': robot_name,
                 'motor_configs': robot_config,
                 'show_ar_tag': 'true',
-                'use_rviz': 'false',
-                'use_sim': 'false',
+                'use_rviz': use_rviz,
+                'use_sim': use_sim,
                 'use_world_frame': 'false'
             }.items()
         ),
@@ -54,7 +81,9 @@ def generate_launch_description():
             executable='cam_driver',
             name='camera',
             parameters=[
-                {'cam_ip': camera_ip}
+                {'cam_ip': camera_ip,
+                 'record': record,
+                 'replay': replay}
             ]
             ),
         # Arm controller to interface with robot arm
