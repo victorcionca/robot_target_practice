@@ -25,12 +25,13 @@ stream_ctrl_url = "http://{cam_ip}/control?var=stream&val={status}"
 def create_caminfo():
     """Create a caminfo for the espcam without a timestamp or sequence"""
     caminfo = CameraInfo()
-    caminfo.width = 320
-    caminfo.height = 240
+    caminfo.width = 640
+    caminfo.height = 480
     caminfo.distortion_model = "plumb_bob"
-    caminfo.d = [0.075469, -0.219867, -0.007941, 0.005980, 0.000000]
-    caminfo.k = [190.139395, 0.000000, 155.972114, 0.000000, 195.942656, 133.193820, 0.000000, 0.000000, 1.000000]
-    caminfo.p = [189.545212, 0.000000, 155.484702, 0.000000, 0.000000, 195.643066, 132.357145, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000]
+    caminfo.d = [-0.025734, -0.025026, 0.000300, 0.000563, 0.000000]
+    caminfo.k = [268.605981, 0.000000, 320.940380, 0.000000, 267.527477, 252.490292, 0.000000, 0.000000, 1.000000]
+
+    caminfo.p = [268.186279, 0.000000, 320.438914, 0.000000, 0.000000, 266.970123, 251.964263, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000]
     caminfo.binning_x = 1
     caminfo.binning_y = 1
     caminfo.header.frame_id = "camera_link"
