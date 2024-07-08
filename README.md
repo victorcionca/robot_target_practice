@@ -1,5 +1,33 @@
 # Running
 
+## Configuration
+
+These instructions are not needed if the Docker file is used.
+
+It is assumed that the ROS2 workspace is in ``/root/work``.
+
+The AprilTag library and its ROS2 node implementation are required:
+
+~~~
+cd /root/work &&\
+git clone https://github.com/AprilRobotics/apriltag.git &&\
+git clone https://github.com/Interbotix/apriltag_ros.git -b ros2-port
+~~~
+
+Then compile all the packages:
+
+~~~
+cd /root/work &&\
+colcon build --packages-select apriltag &&\
+colcon build --packages-select apriltag_ros &&\
+colcon build --packages-select esp32cam_driver &&\
+colcon build --packages-select target_practice &&\
+~~~
+
+AprilTag detection must be configured for the correct tags. The configuration
+files are provided in ``apriltag_ros_config``. These must be copied into
+``install/apriltag_ros/share/apriltag_ros/config/``.
+
 ## With real hardware
 
 The udev rules must be configured to pick up the interbotix arms and assign specific devices.
