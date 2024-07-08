@@ -33,6 +33,9 @@ class ArmController(InterbotixManipulatorXS):
         self.sleep_arm_srv = self.core.create_service(Trigger,
                                                       f'/{robot_name}/sleep',
                                                       self.go_to_sleep)
+        self.reset_arm_srv = self.core.create_service(Trigger,
+                                                      f'/{robot_name}/reset_arm',
+                                                      self.reset_arm)
         self.scan_timer = None
         self.target_scan_position = 0.785375
         self.scan_time = 4.0 # seconds
@@ -72,7 +75,7 @@ class ArmController(InterbotixManipulatorXS):
         self.scan_timer = self.core.create_timer(self.scan_time, self.arm_scan)
         
     def move_arm(self, request, response):
-        target_point = request.start.point
+        target_point = request.start.pose.position
         duration_timestamp = request.start.header.stamp
         duration = duration_timestamp.sec + duration_timestamp.nanosec/1e9
         self.core.get_logger().info(f'Moving arm to {target_point.x, target_point.y, target_point.z}')
@@ -83,7 +86,7 @@ class ArmController(InterbotixManipulatorXS):
                                         blocking=False)
         #if self.auto_finish:
         #    self.timer = self.core.create_timer(1.0,self.finish)
-        response.success = success
+        response.plan.poses = []
         return response
 
     def finish(self):
@@ -92,6 +95,11 @@ class ArmController(InterbotixManipulatorXS):
         self.arm.set_ee_pose_components(x=0.15, y=0, z=0.24)
         self.core.destroy_timer(self.timer)
         # self.shutdown() This should be done on Interrupt, before exit
+
+    def reset_arm(self, request, response):
+        self.arm.set_ee_pose_components(x=0.15, y=0, z=0.24)
+        response.success = True
+        return response
 
     def go_to_sleep(self, request, response):
         self.arm.set_ee_pose_components(x=0.15, y=0, z=0.24)
