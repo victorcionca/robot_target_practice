@@ -1,0 +1,91 @@
+FROM ubuntu:20.04
+
+# Minimal setup
+RUN apt-get update \
+ && apt-get install -y locales lsb-release
+ARG DEBIAN_FRONTEND=noninteractive
+RUN dpkg-reconfigure locales
+
+RUN apt install -y software-properties-common
+RUN add-apt-repository universe
+
+RUN apt update\
+ && apt install -y curl vim git screen iproute2 iputils-ping
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+RUN sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null'
+
+RUN apt update\
+ && apt upgrade -y\
+ && apt install -y ros-galactic-desktop python3-argcomplete\
+ && apt install -y ros-galactic-realsense2-camera\
+                   python3-rosdep python3-rosinstall python3-rosinstall-generator \
+                   python3-wstool build-essential python3-colcon-common-extensions
+
+RUN echo "source /opt/ros/galactic/setup.bash" >> /root/.bashrc
+
+# Install the Interbotix packages
+RUN apt-get install -y ros-galactic-joint-trajectory-controller ros-galactic-rviz-visual-tools\
+                   ros-galactic-tf-transformations ros-galactic-xacro ros-galactic-tf-transformations\
+                   ros-galactic-dynamixel-sdk ros-galactic-gazebo-ros\
+                   ros-galactic-joint-state-publisher-gui ros-galactic-moveit-ros-planning\
+                   ros-galactic-moveit-ros-planning-interface ros-galactic-ros2controlcli\
+                   ros-galactic-controller-manager ros-galactic-joint-state-publisher\
+                   ros-galactic-gazebo-ros2-control ros-galactic-ros2-controllers\
+                   ros-galactic-moveit-setup-assistant ros-galactic-effort-controllers\
+                   ros-galactic-moveit-common ros-galactic-graph-msgs ros-galactic-moveit-planners-ompl\
+                   ros-galactic-moveit-simple-controller-manager ros-galactic-pcl-ros
+RUN apt-get install -y python3-pip
+RUN /bin/bash -c 'source /opt/ros/galactic/setup.bash &&\
+    rosdep init && rosdep update --include-eol-distros &&\
+    mkdir -p /root/interbotix_ws/src && cd /root/interbotix_ws/src &&\
+    git clone https://github.com/Interbotix/interbotix_ros_core.git -b galactic &&\
+    git clone https://github.com/Interbotix/interbotix_ros_manipulators.git -b galactic &&\
+    git clone https://github.com/Interbotix/interbotix_ros_toolboxes.git -b galactic &&\
+    git clone https://github.com/ros-planning/moveit_visual_tools.git -b ros2 &&\
+    rm interbotix_ros_toolboxes/interbotix_common_toolbox/interbotix_moveit_interface/COLCON_IGNORE &&\
+    rm interbotix_ros_toolboxes/interbotix_common_toolbox/interbotix_moveit_interface_msgs/COLCON_IGNORE &&\
+    cd interbotix_ros_core &&\
+    git submodule update --init interbotix_ros_xseries/dynamixel_workbench_toolbox &&\
+    git submodule update --init interbotix_ros_xseries/interbotix_xs_driver &&\
+    cd /root/interbotix_ws && rosdep install --from-paths src --ignore-src -r -y && colcon build'
+
+# Build interbotix perception
+RUN /bin/bash -c 'source /opt/ros/galactic/setup.bash &&\
+    cd /root/interbotix_ws &&\
+    rm src/interbotix_ros_manipulators/interbotix_ros_xsarms/interbotix_xsarm_perception/COLCON_IGNORE &&\
+    colcon build --paths src/interbotix_ros_core/interbotix_ros_xseries/* --packages-select interbotix_xs_msgs &&\
+    source /root/interbotix_ws/install/setup.bash &&\
+    colcon build --paths src/interbotix_ros_manipulators/interbotix_ros_xsarms/* --packages-select interbotix_xsarm_perception &&\
+    rm src/interbotix_ros_toolboxes/interbotix_perception_toolbox/COLCON_IGNORE &&\
+    colcon build --paths src/interbotix_ros_toolboxes/interbotix_perception_toolbox/* --packages-select interbotix_perception_msgs &&\
+    colcon build --paths src/interbotix_ros_toolboxes/interbotix_perception_toolbox/* --packages-select interbotix_perception_pipelines &&\
+    colcon build --paths src/interbotix_ros_toolboxes/interbotix_perception_toolbox/* --packages-select interbotix_perception_modules'
+
+RUN /bin/bash -c 'pip install modern_robotics'
+
+# Clone and install target_practice repo and dependencies
+RUN /bin/bash -c 'source /opt/ros/galactic/setup.bash &&\
+    cd /root &&\
+    git clone https://github.com/victorcionca/robot_target_practice.git work &&\
+    cd work/src &&\
+    git clone https://github.com/AprilRobotics/apriltag.git &&\
+    git clone https://github.com/Interbotix/apriltag_ros.git -b ros2-port &&\
+    cd /root/work &&\
+    colcon build --packages-select apriltag &&\
+    colcon build --packages-select apriltag_ros &&\
+    colcon build --packages-select esp32cam_driver &&\
+    colcon build --packages-select target_practice &&\
+    cp apriltag_ros_config/* install/apriltag_ros/share/apriltag_ros/config/'
+
+# Install ros-grasp-library
+#RUN cd /root\
+#    && git clone https://github.com/atenpas/gpg.git \
+#    && cd gpg \
+#    && sed -i -e '/this_thread/d' src/gpg/plot.cpp\
+#    && mkdir build && cd build \
+#    && cmake .. \
+#    && make \
+#    && make install
+
+#
