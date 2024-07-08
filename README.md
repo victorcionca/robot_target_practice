@@ -1,8 +1,24 @@
-# Running
+# Configuration
 
-## Configuration
+## Udev rules
 
-These instructions are not needed if the Docker file is used.
+The udev rules must be configured to pick up the interbotix arms and assign specific devices.
+
+Example:
+
+~~~
+# U2D2 board (also sets latency timer to 1ms for faster communication)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014",
+	ATTRS{serial}=="FT7923G0", ENV{ID_MM_DEVICE_IGNORE}="1",
+	ATTR{device/latency_timer}="1", SYMLINK+="ttyDXL1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014",
+	ATTRS{serial}=="FT792AA0", ENV{ID_MM_DEVICE_IGNORE}="1",
+	ATTR{device/latency_timer}="1", SYMLINK+="ttyDXL2"
+~~~
+
+## Dependencies and compilation
+
+_These instructions are not needed if the Docker file is used._
 
 It is assumed that the ROS2 workspace is in ``/root/work``.
 
@@ -28,21 +44,24 @@ AprilTag detection must be configured for the correct tags. The configuration
 files are provided in ``apriltag_ros_config``. These must be copied into
 ``install/apriltag_ros/share/apriltag_ros/config/``.
 
+# Running
+
+Before running the ``target practice`` application the Interbotix workspace must
+be sourced to set up the environment variables (e.g. paths).
+
+~~~
+cd /root
+. interbotix_ws/install/setup.bash
+~~~
+
+Also source the ``target practice`` workspace:
+
+~~~
+cd /root
+. work/install/setup.bash
+~~~
+
 ## With real hardware
-
-The udev rules must be configured to pick up the interbotix arms and assign specific devices.
-
-Example:
-
-~~~
-# U2D2 board (also sets latency timer to 1ms for faster communication)
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014",
-	ATTRS{serial}=="FT7923G0", ENV{ID_MM_DEVICE_IGNORE}="1",
-	ATTR{device/latency_timer}="1", SYMLINK+="ttyDXL1"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014",
-	ATTRS{serial}=="FT792AA0", ENV{ID_MM_DEVICE_IGNORE}="1",
-	ATTR{device/latency_timer}="1", SYMLINK+="ttyDXL2"
-~~~
 
 If using ``esp32 camera`` determine its IP address, e.g. connect over ``screen`` to the tty device,
 reset the camera and observe the IP.
