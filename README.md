@@ -1,3 +1,35 @@
+# Docker containers
+
+A Docker container for ROS2 Galactic is available in the "docker" folder.
+In addition there is a script for creating the container with the proper 
+privileges and network support, and a script for starting and attaching a
+container.
+
+Build the container, from the folder containing ``Dockerfile.galactic``:
+
+~~~
+sudo docker build -f Dockerfile.galactic -t ros_galactic:2.0 .
+~~~
+
+Create (and run) the container:
+
+~~~
+sh create_and_run_docker.sh CONTAINER_NAME
+~~~
+
+With the above command you can create multiple containers. ``CONTAINER_NAME`` is
+the name that the container will take. This will be used when starting and
+attaching to the container.
+
+* you can create a ``local`` container that will run the _local_ launch file,
+and a ``remote`` container that will run the _remote_ launch file.
+
+Start and attach the container:
+
+~~~
+sh start_attach_container.sh CONTAINER_NAME
+~~~
+
 # Configuration
 
 ## Udev rules
