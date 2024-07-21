@@ -12,6 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name, ['launch/target_practice_launch.py',
                                    'launch/arm_controller_launch.py',
+                                   'launch/arm_controller_launch_with_locator.py',
                                    'launch/arm_controller_launch_with_camera.py',
                                    'launch/arm_controller_launch_with_camera_espcam.py',
                                    'launch/robot_local_launch.py',
@@ -38,6 +39,7 @@ setup(
             'timer_test = target_practice.timer_test:main',
             'camera_calibrator = target_practice.camera_calibrator:main',
             'single_detection = target_practice.single_detection:main',
+            'realsense_locator = target_practice.realsense_locator:main'
         ],
     },
 )
