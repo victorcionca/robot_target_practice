@@ -35,6 +35,7 @@ class RealSenseLocator(Node):
         self.realsense_frame = 'realsense/camera_link'
         self.robot_base_frame = 'px150_1/base_link'
         self.arm_tag_frame = 'px150_1/ar_tag_link'
+        self.target_frame = 'robot_target' # TODO should be parameter
         self.tf_static_bcast = StaticTransformBroadcaster(self)
         self.tf_bcast = TransformBroadcaster(self)
         # Timer for obtaining transform between robot base and arm tag
@@ -63,7 +64,7 @@ class RealSenseLocator(Node):
         # Transform between camlink and robot baselink
         self.robot_to_base_tf = None
 
-    def find_tag(self, ref_frame, direction):
+    def find_tag(self, ref_tf, parent_frame, child_frame, direction):
         """
         Find the AR tag and create a transform between the tag
         and a reference frame.
@@ -77,7 +78,9 @@ class RealSenseLocator(Node):
         Params:
         =======
 
-        ref_frame   -- Reference TF
+        ref_tf   -- Reference TF
+        parent_frame    -- String name for parent frame
+        child_frame     -- String name for child frame
         direction   -- 0 or 1, see above.
         """
         # take the average pose (w.r.t. the camera frame) of the AprilTag over number of samples
@@ -102,7 +105,7 @@ class RealSenseLocator(Node):
         # defined in the URDF - not the one found by the algorithm)
         # We can't publish the AR tag pose found using the AprilTag algorithm to the /tf tree since
         # ROS forbids a link to have multiple parents
-        T_Ref = ref_frame
+        T_Ref = ref_tf
 
         # Now, lets find the transform between the ref frame and the tag
         if direction == 0:
@@ -119,8 +122,8 @@ class RealSenseLocator(Node):
         trans.transform.translation.z = tf_mat[2, 3]
         trans.transform.rotation =\
             Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
-        trans.header.frame_id = self.realsense_frame
-        trans.child_frame_id = self.robot_base_frame
+        trans.header.frame_id = parent_frame
+        trans.child_frame_id = child_frame
         trans.header.stamp = self.get_clock().now().to_msg()
         return trans
         
@@ -220,12 +223,18 @@ class RealSenseLocator(Node):
                 self.destroy_subscription(self.tag_detect_sub)
             # Generate a TF
             if self.locating:
-                self.robot_to_base_tf = self.find_tag(self.robot_to_arm_tf, 0)
+                self.robot_to_base_tf = self.find_tag(self.robot_to_arm_tf,
+                                                      self.realsense_frame,
+                                                      self.robot_base_frame,
+                                                      0)
                 # Publish with static broadcaster
                 self.tf_static_bcast.sendTransform(self.robot_to_base_tf)
                 self.locating = False
             elif self.detecting:
-                target_tag_to_base_tf = self.find_tag(self.robot_to_base_tf, 1)
+                target_tag_to_base_tf = self.find_tag(self.robot_to_base_tf,
+                                                      self.robot_base_frame,
+                                                      self.target_frame,
+                                                      1)
                 # Publish pose of the target using TF
                 self.tf_bcast.sendTransform(target_tag_to_base_tf)
             self.get_logger().info('TF published')
