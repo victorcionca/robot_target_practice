@@ -162,6 +162,7 @@ class RealSenseLocator(Node):
             response.success = False
             return response
         self.locating = True
+        self.detections = []
         self.tag_detect_sub = self.tag_detect_sub = self.create_subscription(
                                         AprilTagDetectionArray,
                                         '/apriltag_ros_continuous_detector_node/tag_detections',
@@ -193,6 +194,7 @@ class RealSenseLocator(Node):
             return
         # Start the AprilTag service again (unless already started)
         self.detecting = True
+        self.detections = []
         self.tag_detect_sub = self.tag_detect_sub = self.create_subscription(
                                         AprilTagDetectionArray,
                                         '/apriltag_ros_continuous_detector_node/tag_detections',
@@ -238,6 +240,7 @@ class RealSenseLocator(Node):
                 # Publish pose of the target using TF
                 self.tf_bcast.sendTransform(target_tag_to_base_tf)
             self.get_logger().info('TF published')
+            self.detections = []
 
 def main(args=None):
     rclpy.init(args=args)
