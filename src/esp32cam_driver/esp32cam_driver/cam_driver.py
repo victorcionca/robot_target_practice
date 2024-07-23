@@ -37,7 +37,7 @@ def create_caminfo():
     caminfo.p = [268.186279, 0.000000, 320.438914, 0.000000, 0.000000, 266.970123, 251.964263, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000]
     caminfo.binning_x = 1
     caminfo.binning_y = 1
-    caminfo.header.frame_id = "camera_link"
+    caminfo.header.frame_id = "espcam/camera_link"
     return caminfo
 
 class Esp32CamDriver(Node):
@@ -205,7 +205,7 @@ class Esp32CamDriver(Node):
                     # Set a timestamp for the frame
                     frame_timestamp_ns = time_ns()
                     # Publish the image
-                    img_msg.header.frame_id = "camera_link"
+                    img_msg.header.frame_id = "espcam/camera_link"
                     img_msg.header.stamp.sec = int(frame_timestamp_ns/1e9)
                     img_msg.header.stamp.nanosec = int(frame_timestamp_ns%1e9)
                     self.img_publisher.publish(img_msg)
