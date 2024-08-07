@@ -19,10 +19,31 @@ def generate_launch_description():
         default_value='px150'
     )
 
+    camera_ip = LaunchConfiguration('camera_ip')
+    camera_ip_arg = DeclareLaunchArgument(
+        'camera_ip',
+        default_value='192.168.0.106'
+    )
+
+    record = LaunchConfiguration('record')
+    record_arg = DeclareLaunchArgument(
+        'record',
+        default_value='false'
+    )
+
+    replay = LaunchConfiguration('replay')
+    replay_arg = DeclareLaunchArgument(
+        'replay',
+        default_value='false'
+    )
+
     
     return LaunchDescription([
         robot_config_arg,
         robot_name_arg,
+        camera_ip_arg,
+        record_arg,
+        replay_arg,
         # interbotix_xsarm_controller xs_launch
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([
@@ -52,23 +73,41 @@ def generate_launch_description():
                 ])
             ]),
             launch_arguments={
-                'camera_name': '/realsense/color',
-                'image_topic': 'image_raw'
+                'camera_name': '/esp_camera',
+                'image_topic': 'image'
             }.items()
         ),
-        # Realsense camera
+        # espcam32 camera
         Node(
-            package='realsense2_camera',
-            namespace='realsense',
-            executable='realsense2_camera_node',
-            name='realsense'
+            package='esp32cam_driver',
+            namespace='esp_camera',
+            executable='cam_driver',
+            name='espcam',
+            parameters=[
+                {'cam_ip': camera_ip,
+                 'record': record,
+                 'replay': replay}
+            ]
         ),
-        # AprilTag continuous detection
         # Locator node
         Node(
             package='target_practice',
             namespace='target_practice',
-            executable='realsense_locator',
-            name='realsense_locator'
-        )
+            executable='espcam_locator',
+            name='espcam_locator'
+        ),
+        # Static TF from camera_link to robot wrist link
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            arguments=['0.05', '0', '0.05', '-1.57075', '0', '-1.57075', 'px150_1/wrist_link', 'espcam/camera_link']
+        ),
+        # Arm controller to interface with robot arm
+        Node(
+            package='target_practice',
+            namespace='target_practice',
+            executable='arm_controller',
+            name='arm_controller',
+            arguments=['--robot_name', robot_name, '--no-autofinish']
+        ),
     ])

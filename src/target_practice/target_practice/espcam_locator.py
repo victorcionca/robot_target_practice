@@ -39,9 +39,10 @@ class EspCamLocator(Node):
         # Sub for april tag detection
         self.target_tag_id = 1  # TODO make this a node parameter
         #  Sub for detection messages
-        self.detect_sub = self.create_subscriber(Bool,
+        self.detect_sub = self.create_subscription(Bool,
                                                  'detect_target',
                                                  self.detect_target,
+                                                 1,
                                                  callback_group=MutuallyExclusiveCallbackGroup())
         self.detecting = False
         # To hold the subscriber to AprilTag detections
@@ -72,41 +73,55 @@ class EspCamLocator(Node):
             [point.x, point.y, point.z, rpy[0], rpy[1], rpy[2]]
         )
 
-        quat = quaternion_from_euler(rpy[0], rpy[1], rpy[2])
-        T_CamTag = TransformStamped()
-        T_CamTag.transform.translation.x = point.x
-        T_CamTag.transform.translation.y = point.y
-        T_CamTag.transform.translation.z = point.z
-        T_CamTag.transform.rotation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
-        T_CamTag.header.frame_id = self.espcam_frame
-        T_CamTag.child_frame_id = self.target_frame
-        T_CamTag.header.stamp = self.node.get_clock().now().to_msg()
-        
-        return T_CamTag
-        
-    def check_transform(self):
-        """Find transform from robot base to wrist camera"""
+        self.get_logger().info(f"Cam to tag (x,y,z): {point.x, point.y, point.z}")
+
+        # We cannot publish this as is because in ROS we cannot have multiple
+        # parents for a frame. We have to obtain the transform from base to camera
+
+        # Find transform from robot base to wrist camera
         t = None
         try:
             now = self.get_clock().now()
             t = self.tf_buffer.lookup_transform(
                     self.robot_base_frame,
-                    self.arm_tag_frame,
+                    self.espcam_frame,
                     now-rclpy.duration.Duration(seconds=2.0))
         except TransformException as ex:
             self.get_logger().error(f'Lookup transform failed: {ex}')
             return
-        if t is not None:
-            self.destroy_timer(self.timer)
+        if t is None:
+            self.get_logger().error(f'Cannot find transform')
+            return
         x = t.transform.translation.x
         y = t.transform.translation.y
         z = t.transform.translation.z
         quat = t.transform.rotation
         quat_list = [quat.x, quat.y, quat.z, quat.w]
         rpy = euler_from_quaternion(quat_list)
-        self.robot_to_arm_tf =\
+        T_BaseArm =\
             ang.pose_to_transformation_matrix([x, y, z, rpy[0], rpy[1], rpy[2]])
+ 
+        # Transform from base to target is T_BaseArm * T_CamTag
+        T_BaseTarget = np.dot(T_BaseArm, T_CamTag)
         
+        return T_BaseTarget
+
+    def matrix_to_tf(self, tf_mat, parent_frame, child_frame):
+        """Convert transformation matrix to TF"""
+        rpy = ang.rotation_matrix_to_euler_angles(tf_mat[:3, :3])
+        quat = quaternion_from_euler(rpy[0], rpy[1], rpy[2])
+        trans = TransformStamped()
+        trans.transform.translation.x = tf_mat[0, 3]
+        trans.transform.translation.y = tf_mat[1, 3]
+        trans.transform.translation.z = tf_mat[2, 3]
+        trans.transform.rotation =\
+            Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
+        trans.header.frame_id = parent_frame
+        trans.child_frame_id = child_frame
+        trans.header.stamp = self.get_clock().now().to_msg()
+        return trans
+
+
     def detect_target(self, msg):
         """
         msg.data is True then start detection.
@@ -149,15 +164,20 @@ class EspCamLocator(Node):
         if len(self.detections) == 5:
             # Generate a TF
             if self.detecting:
-                target_tag_to_base_tf = self.find_tag()
+                base_to_target_mat = self.find_tag()
+                # Convert matrix to transform
+                transform = self.matrix_to_tf(base_to_target_mat,
+                                              self.robot_base_frame,
+                                              self.target_frame)
                 # Publish pose of the target using TF
-                self.tf_bcast.sendTransform(target_tag_to_base_tf)
+                self.tf_bcast.sendTransform(transform)
             self.get_logger().info('TF published')
+            self.detections = []
 
 def main(args=None):
     rclpy.init(args=args)
     
-    calibrator = RealSenseLocator()
+    calibrator = EspCamLocator()
     executor = MultiThreadedExecutor()
     executor.add_node(calibrator)
     executor.spin()
