@@ -51,9 +51,10 @@ class RealSenseLocator(Node):
                                            self.locate_robot,
                                            callback_group=MutuallyExclusiveCallbackGroup())
         #  Sub for detection messages
-        self.detect_sub = self.create_subscriber(Bool,
+        self.detect_sub = self.create_subscription(Bool,
                                                  'detect_target',
                                                  self.detect_target,
+                                                 1,
                                                  callback_group=MutuallyExclusiveCallbackGroup())
         self.locating = False
         self.detecting = False
@@ -61,27 +62,23 @@ class RealSenseLocator(Node):
         self.tag_detect_sub = None
         # Average over 5 detections
         self.detections = []
-        # Transform between camlink and robot baselink
-        self.robot_to_base_tf = None
+        # Transform between camlink and robot baselink, in matrix format
+        self.base_to_camlink_tf_mat = None
 
-    def find_tag(self, ref_tf, parent_frame, child_frame, direction):
+    def find_tag(self, ref_tf, invert=False):
         """
-        Find the AR tag and create a transform between the tag
-        and a reference frame.
-        Based on the pose of the tag relative to the camera creates
-        a transform relative to the ref frame.
-        If direction is 0 the end transform will be from the camera
-        to the reference frame.
-        If direction is 1 the end transform will be from the reference
-        frame to the tag.
+        Find the AR tag and create a transformation matrix
+        from the reference frame (ref_tf) to the tag
+        Determines M_{ct} the matrix bw camera and tag based on the
+        AprilTag pose estimation.
+        If invert is True it returns ref_tf x M_{ct}^{-1}.
+        Otherwise it returns ref_tf x M_{ct}.
 
         Params:
         =======
 
         ref_tf   -- Reference TF
-        parent_frame    -- String name for parent frame
-        child_frame     -- String name for child frame
-        direction   -- 0 or 1, see above.
+        invert   -- Whether to invert the relation bw camera and tag.
         """
         # take the average pose (w.r.t. the camera frame) of the AprilTag over number of samples
         num_samples = len(self.detections)
@@ -101,19 +98,22 @@ class RealSenseLocator(Node):
             [point.x, point.y, point.z, rpy[0], rpy[1], rpy[2]]
         )
 
+        self.get_logger().info(f"Cam to tag (x,y,z): {point.x, point.y, point.z}")
         # Now, get a snapshot of the pose of arm's base_link frame w.r.t. the AR tag link (as
         # defined in the URDF - not the one found by the algorithm)
         # We can't publish the AR tag pose found using the AprilTag algorithm to the /tf tree since
         # ROS forbids a link to have multiple parents
         T_Ref = ref_tf
 
+        if invert:
+             T_CamTag = np.linalg.inv(T_CamTag)
         # Now, lets find the transform between the ref frame and the tag
-        if direction == 0:
-            tf_mat = np.dot(T_CamTag, T_Ref)
-        elif direction == 1:
-            tf_mat = np.dor(T_Ref, T_CamTag)
+        tf_mat = np.dot(T_Ref, T_CamTag)
 
-        # Create a tf between the camera link and robot base link
+        return tf_mat
+
+    def matrix_to_tf(self, tf_mat, parent_frame, child_frame):
+        """Convert transformation matrix to TF"""
         rpy = ang.rotation_matrix_to_euler_angles(tf_mat[:3, :3])
         quat = quaternion_from_euler(rpy[0], rpy[1], rpy[2])
         trans = TransformStamped()
@@ -126,7 +126,19 @@ class RealSenseLocator(Node):
         trans.child_frame_id = child_frame
         trans.header.stamp = self.get_clock().now().to_msg()
         return trans
-        
+
+    def tf_to_matrix(self, tf):
+        """Converts the TF transform into matrix format"""
+        x = tf.transform.translation.x
+        y = tf.transform.translation.y
+        z = tf.transform.translation.z
+        quat = tf.transform.rotation
+        quat_list = [quat.x, quat.y, quat.z, quat.w]
+        rpy = euler_from_quaternion(quat_list)
+        tf_mat =\
+            ang.pose_to_transformation_matrix([x, y, z, rpy[0], rpy[1], rpy[2]])
+        return tf_mat
+
     def check_transform(self):
         t = None
         try:
@@ -140,15 +152,7 @@ class RealSenseLocator(Node):
             return
         if t is not None:
             self.destroy_timer(self.timer)
-        x = t.transform.translation.x
-        y = t.transform.translation.y
-        z = t.transform.translation.z
-        quat = t.transform.rotation
-        quat_list = [quat.x, quat.y, quat.z, quat.w]
-        rpy = euler_from_quaternion(quat_list)
-        self.robot_to_arm_tf =\
-            ang.pose_to_transformation_matrix([x, y, z, rpy[0], rpy[1], rpy[2]])
-
+        self.robot_to_arm_tf = self.tf_to_matrix(t)
         
     def locate_robot(self, request, response):
         if self.locating or self.detecting:
@@ -189,7 +193,7 @@ class RealSenseLocator(Node):
             self.get_logger().error("Cannot start detection while locating arm or if already detecting")
             return
         # We need to have the TF from base to cam_link
-        if self.robot_to_base_tf is None:
+        if self.base_to_camlink_tf_mat is None:
             self.get_logger().error("Started detection but don't know where the robot base is")
             return
         # Start the AprilTag service again (unless already started)
@@ -225,20 +229,20 @@ class RealSenseLocator(Node):
                 self.destroy_subscription(self.tag_detect_sub)
             # Generate a TF
             if self.locating:
-                self.robot_to_base_tf = self.find_tag(self.robot_to_arm_tf,
-                                                      self.realsense_frame,
+                self.base_to_camlink_tf_mat = self.find_tag(self.robot_to_arm_tf, True)
+                base_to_camlink_tf = self.matrix_to_tf(self.base_to_camlink_tf_mat,
                                                       self.robot_base_frame,
-                                                      0)
+                                                      self.realsense_frame)
                 # Publish with static broadcaster
-                self.tf_static_bcast.sendTransform(self.robot_to_base_tf)
+                self.tf_static_bcast.sendTransform(base_to_camlink_tf)
                 self.locating = False
             elif self.detecting:
-                target_tag_to_base_tf = self.find_tag(self.robot_to_base_tf,
+                base_to_target_mat = self.find_tag(self.base_to_camlink_tf_mat, False)
+                base_to_target_tf = self.matrix_to_tf(base_to_target_mat,
                                                       self.robot_base_frame,
-                                                      self.target_frame,
-                                                      1)
+                                                      self.target_frame)
                 # Publish pose of the target using TF
-                self.tf_bcast.sendTransform(target_tag_to_base_tf)
+                self.tf_bcast.sendTransform(base_to_target_tf)
             self.get_logger().info('TF published')
             self.detections = []
 
