@@ -36,14 +36,20 @@ class EspCamLocator(Node):
         self.robot_base_frame = 'px150_1/base_link'
         self.target_frame = 'robot_target' # TODO should be parameter
         self.tf_bcast = TransformBroadcaster(self)
-        # Sub for april tag detection
+        # AprilTag IDs
         self.target_tag_id = 1  # TODO make this a node parameter
+        self.stop_tag_id = 10   # TODO make this a node parameter
         #  Sub for detection messages
         self.detect_sub = self.create_subscription(Bool,
                                                  'detect_target',
                                                  self.detect_target,
                                                  1,
                                                  callback_group=MutuallyExclusiveCallbackGroup())
+        # Publisher for target pose TF
+        self.target_pub = self.create_publisher(TransformStamped,
+                                                '/target_practice/target_pose',
+                                                1,
+                                                callback_group=MutuallyExclusiveCallbackGroup())
         self.detecting = False
         # To hold the subscriber to AprilTag detections
         self.tag_detect_sub = None
@@ -140,9 +146,9 @@ class EspCamLocator(Node):
         # Start the AprilTag service again (unless already started)
         self.detecting = True
         self.detections = []
-        self.tag_detect_sub = self.tag_detect_sub = self.create_subscription(
+        self.tag_detect_sub = self.create_subscription(
                                         AprilTagDetectionArray,
-                                        '/apriltag_ros_continuous_detector_node/tag_detections',
+                                        '/apriltag_espcam/apriltag_ros_continuous_detector_node/tag_detections',
                                         self.tag_detection_cb,
                                         10,
                                         callback_group=ReentrantCallbackGroup()
@@ -157,6 +163,8 @@ class EspCamLocator(Node):
             if self.detecting and d.id[0] == self.target_tag_id:
                 tag_pose = d.pose.pose.pose
                 break
+            if self.detecting and d.id[0] == self.stop_tag_id:
+
         if tag_pose is None:
             return
         self.get_logger().info('Detected tag')
@@ -167,10 +175,10 @@ class EspCamLocator(Node):
                 base_to_target_mat = self.find_tag()
                 # Convert matrix to transform
                 transform = self.matrix_to_tf(base_to_target_mat,
-                                              self.robot_base_frame,
+                                              'espcam',
                                               self.target_frame)
                 # Publish pose of the target using TF
-                self.tf_bcast.sendTransform(transform)
+                self.target_pub.publish(transform)
             self.get_logger().info('TF published')
             self.detections = []
 

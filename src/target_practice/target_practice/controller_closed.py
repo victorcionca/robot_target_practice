@@ -12,11 +12,13 @@ from tf2_ros.transform_listener import TransformListener
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
 from nav_msgs.srv import GetPlan
+from geometry_msgs.msg import TransformStamped
 from apriltag_ros.msg import AprilTagDetection, AprilTagDetectionArray
 from example_interfaces.srv import Trigger
-from example_interface.msg import Bool
+from example_interfaces.msg import Bool
 
 import random
+from threading import Lock
 
 class TargetPoseEstimate():
     
@@ -25,10 +27,10 @@ class TargetPoseEstimate():
         self.y = None
         self.z = None
 
-    def update(self, transform):
+    def update(self, source, position):
         """
         Update the target pose estimate based on the 
-        received transform.
+        position received from the source
         
         ##### Params
 
@@ -60,10 +62,8 @@ class EWMATargetPoseEstimate(TargetPoseEstimate):
         super().__init__()
         self.alpha = alpha
 
-    def update(self, transform):
-        new_x = transform.transform.translation.x
-        new_y = transform.transform.translation.y
-        new_z = transform.transform.translation.z
+    def update(self, source, pos):
+        new_x, new_y, new_z = pos
         if self.x is None or self.y is None or self.z is None:
             self.x = new_x
             self.y = new_y
@@ -93,10 +93,11 @@ class TargetPracticeController(Node):
         self.target_estimate = EWMATargetPoseEstimate(0.25)
         # Timer to periodically look up the target transform
         self.target_lookup_timer = None
-        self.target_lookup_period = 0.5 # How often to lookup the target (TODO: param)
+        self.target_lookup_period = 1.0 # How often to lookup the target (TODO: param)
         # The move must complete before deadline
-        self.move_time = 2.0 # TODO: param
+        self.move_time = 4.0 # TODO: param
         self.end_of_move_time = None
+        self.end_of_move_timer = None
         # Service to trigger target detection for on-demand activity
         self.detect_target_srv = self.create_service(Trigger,
                                               'detect_target',
@@ -105,7 +106,14 @@ class TargetPracticeController(Node):
         self.detecting = False
         # Publisher to the detect_target topic
         self.detection_pub = self.create_publisher(Bool,
-                                                   'detect_target', 1)
+                                                   'detect_target', 1,
+                                                   callback_group=MutuallyExclusiveCallbackGroup())
+        # Subscribe to target pose messages
+        self.target_pose_sub = None
+        # Locked dictionary for storing target pose updates
+        self.target_pose_lock = Lock()
+        self.target_pose_dict = dict()
+        # Schedule 1s period for target pose estimation and move
         # Connect to arm controller
         # Define queue depth 1 for the server
         qos_profile = QoSProfile(
@@ -121,8 +129,10 @@ class TargetPracticeController(Node):
         self.arm_sleep = self.create_client(Trigger,
                                                      f'/px150_1/sleep',
                                                      callback_group=MutuallyExclusiveCallbackGroup())
+        self.get_logger().info("Controller started")
 
     def detect_target(self, request, response):
+        self.get_logger().info("Detect target")
         if self.detecting:
             self.get_logger().info("Already detecting")
             response.success = False
@@ -131,46 +141,74 @@ class TargetPracticeController(Node):
         # Reset the target estimate
         self.target_estimate.reset()
         # Publish the detection message
-        self.detection_pub.publish(Bool(True))
+        self.detection_pub.publish(Bool(data= True))
         # Set the deadline timer
-        self.end_of_move_time = self.get_clock().now() + self.move_time
-        self.create_timer(self.move_time,
-                            self.end_move,
-                            MutuallyExclusiveCallbackGroup())
-        # Perform the first lookup asap
-        self.target_lookup_timer = self.create_timer(0.01,
+        self.get_logger().info("Move starting")
+        self.end_of_move_time = self.get_clock().now()\
+                                + rclpy.duration.Duration(seconds=self.move_time)
+        self.end_move_timer = self.create_timer(self.move_time,
+                                            self.end_move,
+                                            MutuallyExclusiveCallbackGroup())
+        # Subscribe to the target pose messages
+        self.target_pose_sub = self.create_subscription(TransformStamped,
+                                                        '/target_practice/target_pose',
+                                                        self.target_pose_cb,
+                                                        2,
+                                                        callback_group=ReentrantCallbackGroup())
+        self.target_lookup_timer = self.create_timer(self.target_lookup_period,
                                                      self.lookup_target,
-                                                     MutuallyExclusiveCallbackGroup())
+                                                     callback_group=MutuallyExclusiveCallbackGroup())
         response.success = True
         return response
 
+    def target_pose_cb(self, msg):
+        """subcriber to target pose updates"""
+        t = msg
+        new_x = t.transform.translation.x
+        new_y = t.transform.translation.y
+        new_z = t.transform.translation.z
+        source = t.header.frame_id
+        # Store the update in the dictionary
+        self.target_pose_lock.acquire()
+        self.target_pose_dict[source] = (new_x, new_y, new_z)
+        self.target_pose_lock.release()
+        self.get_logger().info(f"Target pose update from {t.header.frame_id}: {new_x, new_y, new_z}")
+
+
     def lookup_target(self):
         """Look for the target transform update target pose estimate and execute move"""
-        if self.target_estimate.is_null():
-            # This is the first call, set the timer properly
-            self.destroy_timer(self.target_lookup_timer)
-            self.target_lookup_timer = self.create_timer(self.target_lookup_period,
-                                                     self.lookup_target,
-                                                     MutuallyExclusiveCallbackGroup())
-        t = None
-        try:
-            now = self.get_clock().now()
-            t = self.tf_buffer.lookup_transform(
-                    self.parent_frame,
-                    self.target_frame,
-                    now-rclpy.duration.Duration(seconds=2.0))
-        except TransformException as ex:
-            self.get_logger().error(f'Lookup transform failed: {ex}')
+        # We may need to restart the timer with a different period
+        self.destroy_timer(self.target_lookup_timer)
+        self.get_logger().info("Looking for target TF")
+        tfs = []
+        # Check what TFs we have available
+        self.target_pose_lock.acquire()
+        for src, pos in self.target_pose_dict.items():
+            tfs.append((src, pos))
+        self.target_pose_lock.release()
+        if len(tfs) == 0:
+            # Nothing yet, reschedule
+            self.target_lookup_timer = self.create_timer(
+                                            0.1,
+                                            self.lookup_target,
+                                            MutuallyExclusiveCallbackGroup())
             return
-        if t is None:
-            return
-        self.target_estimate.update(t)
+        self.get_logger().info("Found transform")
+        for src, pos in tfs:
+            self.target_estimate.update(src, pos)
         self.move_arm()
         # TODO we should stop updating if too close to the target or too little time
         # If the move time is too short we get very fast arm movement potentially dangerous
-        if self.end_of_move_time - self.get_clock().now() < rclpy.duration.Duration(seconds=0.5):
-            self.destroy_timer(self.target_lookup_timer)
+        if self.end_of_move_time - self.get_clock().now()\
+                    < rclpy.duration.Duration(seconds=self.target_lookup_period):
             self.target_lookup_timer = None
+            self.get_logger().info("This was the last lookup")
+        else:
+            self.get_logger().info("Rescheduling")
+            self.target_lookup_timer = self.create_timer(
+                                            self.target_lookup_period,
+                                            self.lookup_target,
+                                            MutuallyExclusiveCallbackGroup())
 
 
     def end_move(self):
@@ -179,21 +217,23 @@ class TargetPracticeController(Node):
         if self.target_lookup_timer is not None:
             self.destroy_timer(self.target_lookup_timer)
         # Stop the target detection
-        self.detection_pub.publish(Bool(False))
+        self.detection_pub.publish(Bool(data= False))
+        self.destroy_timer(self.end_move_timer)
         # Bring the arm back to sleep position
         self.arm_sleep.call(Trigger.Request())
         self.detecting = False
         self.target_estimate.reset()
         
     def move_arm(self):
+        (x,y,z) = self.target_estimate.get_crt_estimate()
         # Create request for move_arm and call
         mov_req = GetPlan.Request()
-        (x,y,z) = self.target_estimate.get_crt_estimate()
         mov_req.start.pose.position.x = x
         mov_req.start.pose.position.y = y
         mov_req.start.pose.position.z = z
         # Calculate moving time
         mov_time = self.end_of_move_time - self.get_clock().now()
+        #mov_time = rclpy.duration.Duration(seconds=1.0)
         mov_sec = mov_req.start.header.stamp.sec = int(mov_time.nanoseconds/1e9)
         mov_nanosec = mov_req.start.header.stamp.nanosec = int(mov_time.nanoseconds % 1e9)
         self.get_logger().info(f'Moving arm to {self.target_abs_pose} in {mov_sec, mov_nanosec}')

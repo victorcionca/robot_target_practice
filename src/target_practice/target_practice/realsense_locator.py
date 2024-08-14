@@ -56,6 +56,11 @@ class RealSenseLocator(Node):
                                                  self.detect_target,
                                                  1,
                                                  callback_group=MutuallyExclusiveCallbackGroup())
+        # Publisher for target pose TF
+        self.target_pub = self.create_publisher(TransformStamped,
+                                                '/target_practice/target_pose',
+                                                1,
+                                                callback_group=MutuallyExclusiveCallbackGroup())
         self.locating = False
         self.detecting = False
         # To hold the subscriber to AprilTag detections
@@ -167,9 +172,9 @@ class RealSenseLocator(Node):
             return response
         self.locating = True
         self.detections = []
-        self.tag_detect_sub = self.tag_detect_sub = self.create_subscription(
+        self.tag_detect_sub =  self.create_subscription(
                                         AprilTagDetectionArray,
-                                        '/apriltag_ros_continuous_detector_node/tag_detections',
+                                        '/apriltag_realsense/apriltag_ros_continuous_detector_node/tag_detections',
                                         self.tag_detection_cb,
                                         10,
                                         callback_group=ReentrantCallbackGroup()
@@ -199,9 +204,9 @@ class RealSenseLocator(Node):
         # Start the AprilTag service again (unless already started)
         self.detecting = True
         self.detections = []
-        self.tag_detect_sub = self.tag_detect_sub = self.create_subscription(
+        self.tag_detect_sub = self.create_subscription(
                                         AprilTagDetectionArray,
-                                        '/apriltag_ros_continuous_detector_node/tag_detections',
+                                        '/apriltag_realsense/apriltag_ros_continuous_detector_node/tag_detections',
                                         self.tag_detection_cb,
                                         10,
                                         callback_group=ReentrantCallbackGroup()
@@ -239,10 +244,10 @@ class RealSenseLocator(Node):
             elif self.detecting:
                 base_to_target_mat = self.find_tag(self.base_to_camlink_tf_mat, False)
                 base_to_target_tf = self.matrix_to_tf(base_to_target_mat,
-                                                      self.robot_base_frame,
+                                                      'realsense',
                                                       self.target_frame)
                 # Publish pose of the target using TF
-                self.tf_bcast.sendTransform(base_to_target_tf)
+                self.target_pub.publish(base_to_target_tf)
             self.get_logger().info('TF published')
             self.detections = []
 
