@@ -16,6 +16,7 @@ setup(
                                    'launch/arm_controller_launch_with_locator_espcam.py',
                                    'launch/arm_controller_launch_with_camera.py',
                                    'launch/arm_controller_launch_with_camera_espcam.py',
+                                   'launch/single_arm_local_launch_two_cameras.py',
                                    'launch/robot_local_launch.py',
                                    'launch/robot_local_launch_espcam.py',
                                    'launch/robot_remote_launch.py',
