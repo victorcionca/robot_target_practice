@@ -97,6 +97,6 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
-            arguments=['0.05', '0', '0.05', '-1.57075', '0', '-1.57075', 'px150_1/wrist_link', 'espcam/camera_link']
+            arguments=['0.0', '0', '0.05', '-1.57075', '0', '-1.57075', 'px150_1/ee_arm_link', 'espcam/camera_link']
         ),
     ])
