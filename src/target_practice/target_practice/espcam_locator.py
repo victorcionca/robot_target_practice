@@ -8,6 +8,7 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 from nav_msgs.srv import GetPlan
+from sensor_msgs.msg import Image
 from geometry_msgs.msg import Point, TransformStamped, Quaternion
 from apriltag_ros.msg import AprilTagDetection, AprilTagDetectionArray
 from example_interfaces.srv import Trigger
@@ -16,6 +17,8 @@ from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from interbotix_common_modules import angle_manipulation as ang
 import numpy as np
 
+from cv_bridge import CvBridge
+import cv2
 import time
 
 
@@ -38,23 +41,36 @@ class EspCamLocator(Node):
         self.tf_bcast = TransformBroadcaster(self)
         # AprilTag IDs
         self.target_tag_id = 1  # TODO make this a node parameter
-        self.stop_tag_id = 10   # TODO make this a node parameter
         #  Sub for detection messages
         self.detect_sub = self.create_subscription(Bool,
                                                  'detect_target',
                                                  self.detect_target,
                                                  1,
                                                  callback_group=MutuallyExclusiveCallbackGroup())
+        # Sub for camera images, to detect touch event
+        self.espcam_sub = None
+        self.cv_bridge = CvBridge()
         # Publisher for target pose TF
         self.target_pub = self.create_publisher(TransformStamped,
                                                 '/target_practice/target_pose',
                                                 1,
                                                 callback_group=MutuallyExclusiveCallbackGroup())
+        # Client to the end_move service of the controller for immediate stop in case of touch det
+        self.end_move_client = self.create_client(Trigger,
+                                                  '/target_practice/end_move',
+                                                  callback_group=MutuallyExclusiveCallbackGroup())
         self.detecting = False
         # To hold the subscriber to AprilTag detections
         self.tag_detect_sub = None
         # Average over 5 detections
         self.detections = []
+        # Subscribe to the espcamera feed for detecting touch event
+        self.espcam_sub = self.create_subscription(
+                                        Image,
+                                        '/esp_camera/image',
+                                        self.esp_camera_cb,
+                                        1,
+                                        callback_group=ReentrantCallbackGroup())
 
     def find_tag(self):
         """
@@ -153,6 +169,46 @@ class EspCamLocator(Node):
                                         10,
                                         callback_group=ReentrantCallbackGroup()
                                         )
+        # Subscribe to the espcamera feed for detecting touch event
+        self.espcam_sub = self.create_subscription(
+                                        Image,
+                                        '/esp_camera/image',
+                                        self.esp_camera_cb,
+                                        1,
+                                        callback_group=ReentrantCallbackGroup())
+
+    def is_color_present(self,img):
+        """Uses opencv to check if the colour is present in the image"""
+        # Based on ChatGPT code
+        # Convert the image to HSV color space
+        hsv_image = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # Define the color range in HSV
+        colour_variation = 10
+        lower_bound = np.array([50,120,70]) # Lower bound for green
+        upper_bound = np.array([70,255,255]) # Upper bound for green
+        
+        # Create a mask that captures areas within the color range
+        mask = cv2.inRange(hsv_image, lower_bound, upper_bound)
+        
+        # Calculate the percentage of the image that is within the color range
+        color_percentage = (np.sum(mask) / 255) / mask.size * 100
+        
+        return color_percentage
+
+    def esp_camera_cb(self, msg):
+        """Callback for camera images from the esp camera"""
+        # Convert message data to CV2 image
+        cv_img = self.cv_bridge.imgmsg_to_cv2(msg)
+        # Use CV2 to process the image looking for the target colour that indicates touch event
+        perc = self.is_color_present(cv_img)
+        if perc > 0.5:
+            self.get_logger().info(f"Touch event detected {perc}. Emergency stop")
+            self.destroy_subscription(self.espcam_sub)
+            self.destroy_subscription(self.tag_detect_sub)
+            self.detecting = False
+            self.end_move_client.call(Trigger.Request())
+            self.get_logger().info("Target detection stopped")
 
     def tag_detection_cb(self, msg):
         tags = msg.detections
@@ -163,8 +219,6 @@ class EspCamLocator(Node):
             if self.detecting and d.id[0] == self.target_tag_id:
                 tag_pose = d.pose.pose.pose
                 break
-            if self.detecting and d.id[0] == self.stop_tag_id:
-
         if tag_pose is None:
             return
         self.get_logger().info('Detected tag')

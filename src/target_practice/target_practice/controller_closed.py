@@ -129,6 +129,11 @@ class TargetPracticeController(Node):
         self.arm_sleep = self.create_client(Trigger,
                                                      f'/px150_1/sleep',
                                                      callback_group=MutuallyExclusiveCallbackGroup())
+        # Dedicated service for ending a move
+        self.end_move_srv = self.create_service(Trigger,
+                                                'end_move',
+                                                self.end_move_cb,
+                                                callback_group=MutuallyExclusiveCallbackGroup())
         self.get_logger().info("Controller started")
 
     def detect_target(self, request, response):
@@ -210,9 +215,18 @@ class TargetPracticeController(Node):
                                             self.lookup_target,
                                             MutuallyExclusiveCallbackGroup())
 
-
+    def end_move_cb(self, req, resp):
+        if self.detecting == False:
+            resp.success = False
+            return
+        self.end_move()
+        resp.success = True
+        return resp
+        
     def end_move(self):
         """Called when the deadline has been reached"""
+        self.detecting = False
+        self.target_pose_dict = dict()
         self.get_logger().info("End move")
         if self.target_lookup_timer is not None:
             self.destroy_timer(self.target_lookup_timer)
@@ -221,14 +235,13 @@ class TargetPracticeController(Node):
         self.destroy_timer(self.end_move_timer)
         # Bring the arm back to sleep position
         self.arm_sleep.call(Trigger.Request())
-        self.detecting = False
         self.target_estimate.reset()
         
     def move_arm(self):
         (x,y,z) = self.target_estimate.get_crt_estimate()
         # Create request for move_arm and call
         mov_req = GetPlan.Request()
-        mov_req.start.pose.position.x = x
+        mov_req.start.pose.position.x = x-0.05  # Account for pointer
         mov_req.start.pose.position.y = y
         mov_req.start.pose.position.z = z
         # Calculate moving time
