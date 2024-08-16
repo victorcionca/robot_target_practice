@@ -129,6 +129,10 @@ class TargetPracticeController(Node):
         self.arm_sleep = self.create_client(Trigger,
                                                      f'/px150_1/sleep',
                                                      callback_group=MutuallyExclusiveCallbackGroup())
+        # Reset the arm at the start of the move
+        self.arm_reset_srv = self.create_client(Trigger,
+                                                     f'/px150_1/reset_arm',
+                                                     callback_group=MutuallyExclusiveCallbackGroup())
         # Dedicated service for ending a move
         self.end_move_srv = self.create_service(Trigger,
                                                 'end_move',
@@ -143,6 +147,8 @@ class TargetPracticeController(Node):
             response.success = False
             return response
         self.detecting = True
+        # Reset the arm
+        self.arm_reset_srv.call(Trigger.Request())
         # Reset the target estimate
         self.target_estimate.reset()
         # Publish the detection message
