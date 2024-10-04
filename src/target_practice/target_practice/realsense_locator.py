@@ -17,6 +17,7 @@ from interbotix_common_modules import angle_manipulation as ang
 import numpy as np
 
 import time
+from sensor_msgs.msg import CameraInfo
 
 
 
@@ -46,6 +47,29 @@ class RealSenseLocator(Node):
         # Sub for april tag detection
         self.arm_tag_id = 87 # TODO make this a node parameter
         self.target_tag_id = 1  # TODO make this a node parameter
+        # Check to see if the camera is available, if not stop here
+        # Use the "/device_info" service on the camera
+        self.cam_check_sub = self.create_subscription(CameraInfo,
+                                                 '/camera/color/camera_info',
+                                                 self.cam_check_cb,
+                                                 callback_group=MutuallyExclusiveCallbackGroup())
+        self.loc_srv = None
+        self.detect_sub = None
+        self.target_pub = None
+        self.locating = False
+        self.detecting = False
+        # To hold the subscriber to AprilTag detections
+        self.tag_detect_sub = None
+        # Average over 5 detections
+        self.detections = []
+        # Transform between camlink and robot baselink, in matrix format
+        self.base_to_camlink_tf_mat = None
+
+
+    def cam_check_cb(self, msg):
+        # If this is called it means the camera is active and we can 
+        # start the rest of the services
+        self.destroy_subscription(self.cam_check_sub)
         self.loc_srv = self.create_service(Trigger,
                                            'locate_robot',
                                            self.locate_robot,
@@ -61,14 +85,7 @@ class RealSenseLocator(Node):
                                                 '/target_practice/target_pose',
                                                 1,
                                                 callback_group=MutuallyExclusiveCallbackGroup())
-        self.locating = False
-        self.detecting = False
-        # To hold the subscriber to AprilTag detections
-        self.tag_detect_sub = None
-        # Average over 5 detections
-        self.detections = []
-        # Transform between camlink and robot baselink, in matrix format
-        self.base_to_camlink_tf_mat = None
+
 
     def find_tag(self, ref_tf, invert=False):
         """

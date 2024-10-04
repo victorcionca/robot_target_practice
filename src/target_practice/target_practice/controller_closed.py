@@ -138,6 +138,17 @@ class TargetPracticeController(Node):
                                                 'end_move',
                                                 self.end_move_cb,
                                                 callback_group=MutuallyExclusiveCallbackGroup())
+        # Try to enable the realsense locator, by calling the locate_robot service
+        realsense_locate_srv = self.create_client(Trigger,
+                                                  '/target_practice/locate_robot')
+        self.get_logger().info("Trying to connect to RealSense")
+        if realsense_locate_srv.wait_for_service(timeout_sec=2.0):
+            self.get_logger().info("RealSense acquired")
+            realsense_locate_srv.call(Trigger.Request())
+        else:
+            self.get_logger().info("Realsense camera not available")
+            self.destroy_client(realsense_locate_srv)
+
         self.get_logger().info("Controller started")
 
     def detect_target(self, request, response):

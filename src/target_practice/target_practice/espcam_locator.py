@@ -71,6 +71,13 @@ class EspCamLocator(Node):
                                         self.esp_camera_cb,
                                         1,
                                         callback_group=ReentrantCallbackGroup())
+        # This will start and stop streaming as needed
+        self.espcam_stream_srv = self.create_client(Trigger,
+                                               '/esp_camera/start_streaming',
+                                               callback_group=MutuallyExclusiveCallbackGroup())
+        self.espcam_stopstream_srv = self.create_client(Trigger,
+                                               '/esp_camera/stop_streaming',
+                                               callback_group=MutuallyExclusiveCallbackGroup())
 
     def find_tag(self):
         """
@@ -149,16 +156,25 @@ class EspCamLocator(Node):
         msg.data is True then start detection.
         msg.data is False then stop detection.
         """
+        self.get_logger().info("Start detecting")
         if msg.data == False and self.detecting:
+            self.detecting = False
+            # Stop streaming
+            self.espcam_stopstream_srv.call(Trigger.Request())
             if self.tag_detect_sub is not None:
                 self.destroy_subscription(self.tag_detect_sub)
-                self.detecting = False
                 self.get_logger().info("Target detection stopped")
                 return
         if msg.data != True: return
         if self.detecting:
             self.get_logger().error("Cannot start detection if already detecting")
             return
+        # Enable streaming on the camera
+        stat = self.espcam_stream_srv.call(Trigger.Request())
+        if not stat:
+            self.get_logger().error("Couldn't enable espcam streaming!")
+            return
+        self.get_logger().info("Enabled streaming from espcam")
         # Start the AprilTag service again (unless already started)
         self.detecting = True
         self.detections = []
