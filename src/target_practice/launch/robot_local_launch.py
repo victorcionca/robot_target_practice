@@ -1,11 +1,17 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import PathJoinSubstitution, TextSubstitution
+from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
 from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
+    camera_ip = LaunchConfiguration('camera_ip')
+    camera_ip_arg = DeclareLaunchArgument(
+        'camera_ip',
+        default_value='192.168.0.106'
+    )
+
     return LaunchDescription([
         # interbotix_xsarm_controller xs_launch
         IncludeLaunchDescription(
@@ -54,5 +60,23 @@ def generate_launch_description():
             parameters=[
                 {'rgb_camera.profile': '1920x1080x15'}
             ]
-            )
+            ),
+        # esp32 camera
+            Node(
+                package='esp32cam_driver',
+                namespace='esp_camera',
+                executable='cam_driver',
+                name='espcam',
+                parameters=[
+                    {'cam_ip': camera_ip,
+                    'record': False,
+                    'replay': False}
+                ]
+                ),
+            # Static TF from camera_link to robot wrist link
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                arguments=['0.0', '0', '0.05', '-1.57075', '0', '-1.57075', 'px150_1/ee_arm_link', 'espcam/camera_link']
+            ),
     ])
