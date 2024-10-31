@@ -1,0 +1,18 @@
+FROM ros_galactic:dev
+
+# Remove OS fastrtps packages
+RUN apt remove -y ros-galactic-fastrtps-cmake-module
+
+RUN /bin/bash -c '\
+        mkdir -p /root/mw/src &&\
+        cd /root/mw/src &&\
+        git clone https://github.com/ros2/rmw_fastrtps -b galactic ros2/rmw_fastrtps &&\
+        git clone https://github.com/eProsima/Fast-DDS -b 2.10.3 eProsima/fastrtps &&\
+        git clone https://github.com/ros2/rosidl_typesupport_fastrtps.git -b galactic &&\
+        sed -i "/BUILD_TESTING/iset(BUILD_TESTING 0)" rosidl_typesupport_fastrtps/rosidl_typesupport_fastrtps_cpp/CMakeLists.txt &&\
+        sed -i "/BUILD_TESTING/iset(BUILD_TESTING 0)" rosidl_typesupport_fastrtps/rosidl_typesupport_fastrtps_c/CMakeLists.txt &&\
+        cd /root/mw &&\
+        source /opt/ros/galactic/setup.bash &&\
+        rosdep install --from src -i -y &&\
+        apt remove -y ros-galactic-fastrtps &&\
+        colcon build --symlink-install'
