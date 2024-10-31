@@ -65,12 +65,12 @@ class EspCamLocator(Node):
         # Average over 5 detections
         self.detections = []
         # Subscribe to the espcamera feed for detecting touch event
-        self.espcam_sub = self.create_subscription(
-                                        Image,
-                                        '/esp_camera/image',
-                                        self.esp_camera_cb,
-                                        1,
-                                        callback_group=ReentrantCallbackGroup())
+        #self.espcam_sub = self.create_subscription(
+        #                                Image,
+        #                                '/esp_camera/image',
+        #                                self.esp_camera_cb,
+        #                                1,
+        #                                callback_group=ReentrantCallbackGroup())
         # This will start and stop streaming as needed
         self.espcam_stream_srv = self.create_client(Trigger,
                                                '/esp_camera/start_streaming',
@@ -102,7 +102,16 @@ class EspCamLocator(Node):
             [point.x, point.y, point.z, rpy[0], rpy[1], rpy[2]]
         )
 
-        self.get_logger().info(f"Cam to tag (x,y,z): {point.x, point.y, point.z}")
+        self.get_logger().info(f"Cam to tag (x,y,z) RAW: {point.x, point.y, point.z}")
+        # Apply the model derived from camera calibration
+        calib_model = {
+            'x': [1.0389, 0.0032],
+            'y': [0.9203, -0.0074],
+            'z': [0.6946, 0.0438]
+        }
+        point.x = point.x*calib_model['x'][0] + calib_model['x'][1]
+        point.y = point.y*calib_model['y'][0] + calib_model['y'][1]
+        point.z = point.z*calib_model['z'][0] + calib_model['z'][1]
 
         # We cannot publish this as is because in ROS we cannot have multiple
         # parents for a frame. We have to obtain the transform from base to camera
@@ -186,12 +195,12 @@ class EspCamLocator(Node):
                                         callback_group=ReentrantCallbackGroup()
                                         )
         # Subscribe to the espcamera feed for detecting touch event
-        self.espcam_sub = self.create_subscription(
-                                        Image,
-                                        '/esp_camera/image',
-                                        self.esp_camera_cb,
-                                        1,
-                                        callback_group=ReentrantCallbackGroup())
+        #self.espcam_sub = self.create_subscription(
+        #                                Image,
+        #                                '/esp_camera/image',
+        #                                self.esp_camera_cb,
+        #                                1,
+        #                                callback_group=ReentrantCallbackGroup())
 
     def is_color_present(self,img):
         """Uses opencv to check if the colour is present in the image"""
@@ -214,15 +223,16 @@ class EspCamLocator(Node):
 
     def esp_camera_cb(self, msg):
         """Callback for camera images from the esp camera"""
+        if not self.detecting: return
         # Convert message data to CV2 image
         cv_img = self.cv_bridge.imgmsg_to_cv2(msg)
         # Use CV2 to process the image looking for the target colour that indicates touch event
         perc = self.is_color_present(cv_img)
         if perc > 0.5:
+            self.detecting = False
             self.get_logger().info(f"Touch event detected {perc}. Emergency stop")
             self.destroy_subscription(self.espcam_sub)
             self.destroy_subscription(self.tag_detect_sub)
-            self.detecting = False
             self.end_move_client.call(Trigger.Request())
             self.get_logger().info("Target detection stopped")
 
